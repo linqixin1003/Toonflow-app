@@ -27,6 +27,11 @@ export const AsoOutputRecordSchema = z.object({
   createdAt: z.number(),
 });
 
+export const AsoNodePositionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+});
+
 export const AsoWorkspaceSchema = z.object({
   version: z.literal(1),
   inputText: z.string(),
@@ -37,6 +42,7 @@ export const AsoWorkspaceSchema = z.object({
   outputSizePreset: z.string(),
   outputs: z.array(AsoOutputRecordSchema),
   lastPlanGeneration: AsoLastPlanGenerationSchema.optional(),
+  nodePositions: z.record(z.string(), AsoNodePositionSchema).optional(),
 });
 
 export type AsoPlan = z.infer<typeof AsoPlanSchema>;

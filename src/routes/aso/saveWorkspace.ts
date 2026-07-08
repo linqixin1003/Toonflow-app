@@ -15,6 +15,7 @@ const patchSchema = z.object({
   outputSizePreset: z.string().optional(),
   outputs: z.array(AsoOutputRecordSchema).optional(),
   lastPlanGeneration: AsoLastPlanGenerationSchema.optional(),
+  nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
 });
 
 const router = express.Router();
