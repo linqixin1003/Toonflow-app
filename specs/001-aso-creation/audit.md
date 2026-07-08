@@ -17,7 +17,7 @@
 | API 自测 | — | ✅ `aso-selftest.ps1` **14/14 PASS** |
 | 回归 T067–T069 | 未执行 | ✅ **API 自测通过** |
 | E2E T070 | 未执行 | ✅ **137s 全流程 PASS**（`aso-e2e.ps1`） |
-| 能否交付 MVP | 未开始 | ✅ **可交付 MVP** — 剩 git 提交 + vendor 入库 + T071 Electron（可选） |
+| 能否交付 MVP | 未开始 | ✅ **已交付 MVP**（git 已 push；T071 自动化 smoke 通过） |
 
 **总评**：MVP 主链路已实现并联调通过；Phase 10（回归/E2E/发布整理）与部分 polish 未完成。
 
@@ -71,7 +71,7 @@
 | T068 script 回归 | ✅ | getScrptApi 正常 |
 | T069 删 ASO OSS | ✅ | delProject 后项目从列表消失（OSS 随 `{id}/` 整目录删除） |
 | T070 E2E 五分钟 | ✅ | `scripts/aso-e2e.ps1` 8/8 PASS，总耗时 137s |
-| T071 Electron | ❌ | |
+| T071 Electron | ✅ | `aso-electron-smoke.ps1` 5/5；GUI 手测见脚本提示 |
 | T072 README/CHANGELOG | 🟡 | CHANGELOG ✅；vendor 文档未入库 |
 
 ---
@@ -97,20 +97,12 @@ src/api/aso.ts            + useAsoPlanStream.ts
 路由 /aso + projectDialog ASO 选项 + workbench asoOnly 菜单
 ```
 
-### 本地未提交
+### 已提交（2026-07-08）
 
-| 路径 | 说明 |
-|------|------|
-| `data/vendor/dashscope.ts` | Vision（Qwen-VL） |
-| `data/vendor/suxi.ts` | 出图 OpenAI 兼容 |
-| `scripts/aso-selftest.ps1` | API 自测 14 项（含 T067–T069） |
-| `scripts/aso-e2e.ps1` | T070 全流程 E2E（8 步） |
-| `scripts/setup-aso-models.ps1` | 模型一键配置 |
-| `AsoWorkbench.vue` M | canvas 布局 |
-| `AsoInspector.vue` ?? | 右侧详情栏 |
-| `InputPanel/PlanList/OutputGallery` M | planCount=1、compact、vertical |
-| i18n M | inspector 文案 |
-| `types.ts` M | planCount 默认 1 |
+| 仓库 | Commit | 内容 |
+|------|--------|------|
+| toonflow `7359a46` | master | vendor、scripts、dist、spec、planCount=1 |
+| toonflow-web `7917c7a` | main | canvas UI、AsoInspector、i18n |
 
 ---
 
@@ -119,13 +111,13 @@ src/api/aso.ts            + useAsoPlanStream.ts
 | ID | 问题 | 严重度 | 建议 |
 |----|------|--------|------|
 | R1 | ~~planCount 默认 1 vs spec~~ | — | spec 已改为默认 1 |
-| R2 | Canvas UI / Inspector **未 git 提交** | 中 | commit + push 两仓库 |
-| R3 | Vendor 未入库，换机/CI 丢失 | 中 | 提交 dashscope/suxi + setup 脚本 |
+| R2 | ~~Canvas UI 未 git 提交~~ | — | 已 push（toonflow `7359a46` / web `7917c7a`） |
+| R3 | Vendor 已入库 | — | dashscope/suxi + setup 脚本已提交 |
 | R4 | ~~gpt-image-1 model_not_found~~ | — | **gpt-image-2 E2E 出图成功（imageId=19, ~133s）** |
 | R5 | ~~Inspector 正文不可编辑~~ | — | 已修复 |
 | R6 | SSE 非逐套 plan_done 事件 | 低 | 与 contracts 差异，功能可用 |
 | R7 | ~~T070 E2E~~ | — | `aso-e2e.ps1` 8/8 PASS，137s |
-| R8 | dist 已 sync，**待 git 提交** | 中 | 与 canvas 源码一并提交 |
+| R8 | ~~dist 待提交~~ | — | 已随 `7359a46` 提交 |
 
 ---
 
@@ -174,8 +166,8 @@ src/api/aso.ts            + useAsoPlanStream.ts
 
 ### 建议顺序
 
-1. **git 提交** canvas UI + vendor + scripts + dist（两仓库）
-2. T071 Electron（如需要桌面打包验证）
+1. 可选：`yarn dev:gui` 打开 ASO 项目做 GUI 手测
+2. 按需：`yarn dist:win` 打包桌面版
 
 ---
 
