@@ -5,6 +5,7 @@ import u from "@/utils";
 import { sendSseEvent, endSse } from "./sse";
 import { AsoPlan, AsoPlanSchema } from "./types";
 import { patchWorkspace } from "./workspace";
+import { acquirePlanGenerationSession } from "./generationLock";
 
 const SKILL_PATH = ["skills", "aso_plan_generation.md"] as const;
 
@@ -254,38 +255,44 @@ export async function generatePlansSync(
   options: GeneratePlansOptions,
 ): Promise<{ plans: AsoPlan[]; visionFallback: boolean }> {
   const { projectId, inputText, planCount, assetIds } = options;
-  await patchWorkspace(projectId, {
-    lastPlanGeneration: { status: "generating", updatedAt: Date.now() },
-  });
-
-  const done = await u.task(projectId, "ASO方案生成", "asoPlan", {
-    describe: `生成 ${planCount} 套创意方案`,
-    content: { planCount, assetIds },
-  });
-
+  const releaseSession = acquirePlanGenerationSession(projectId);
   try {
-    const { plans, visionFallback } = await runPlanGeneration(options);
     await patchWorkspace(projectId, {
-      plans,
-      planCount,
-      inputText,
-      selectedPlanId: plans[0]?.id ?? null,
-      lastPlanGeneration: { status: "done", updatedAt: Date.now() },
+      lastPlanGeneration: { status: "generating", updatedAt: Date.now() },
     });
-    await done(1);
-    return { plans, visionFallback };
-  } catch (e) {
-    const message = u.error(e).message;
-    await patchWorkspace(projectId, {
-      lastPlanGeneration: { status: "error", errorReason: message, updatedAt: Date.now() },
+
+    const done = await u.task(projectId, "ASO方案生成", "asoPlan", {
+      describe: `生成 ${planCount} 套创意方案`,
+      content: { planCount, assetIds },
     });
-    await done(-1, message);
-    throw e;
+
+    try {
+      const { plans, visionFallback } = await runPlanGeneration(options);
+      await patchWorkspace(projectId, {
+        plans,
+        planCount,
+        inputText,
+        selectedPlanId: plans[0]?.id ?? null,
+        lastPlanGeneration: { status: "done", updatedAt: Date.now() },
+      });
+      await done(1);
+      return { plans, visionFallback };
+    } catch (e) {
+      const message = u.error(e).message;
+      await patchWorkspace(projectId, {
+        lastPlanGeneration: { status: "error", errorReason: message, updatedAt: Date.now() },
+      });
+      await done(-1, message);
+      throw e;
+    }
+  } finally {
+    releaseSession();
   }
 }
 
 export async function streamPlansToSse(res: Response, req: import("express").Request, options: GeneratePlansOptions) {
   const { projectId, planCount } = options;
+  const releaseSession = acquirePlanGenerationSession(projectId);
 
   await patchWorkspace(projectId, {
     lastPlanGeneration: { status: "generating", updatedAt: Date.now() },
@@ -352,5 +359,7 @@ export async function streamPlansToSse(res: Response, req: import("express").Req
     await done(-1, message);
     sendSseEvent(res, "error", { message });
     endSse(res);
+  } finally {
+    releaseSession();
   }
 }

@@ -15,8 +15,12 @@ export function success<T>(data: T | null = null, message: string = "成功"): A
 
 // 客户端错误响应
 export function error<T>(message: string = "", data: T | null = null): ApiResponse {
+  return apiError(message, 400, data);
+}
+
+export function apiError<T>(message: string = "", code = 400, data: T | null = null): ApiResponse {
   return {
-    code: 400,
+    code,
     data,
     message,
   };

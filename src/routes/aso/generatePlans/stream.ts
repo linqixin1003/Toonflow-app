@@ -1,11 +1,12 @@
 import express from "express";
 import { z } from "zod";
 import u from "@/utils";
-import { error } from "@/lib/responseFormat";
+import { apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject } from "@/services/aso/workspace";
 import { initSse, sendSseEvent, endSse } from "@/services/aso/sse";
 import { streamPlansToSse, validatePlanInput } from "@/services/aso/planGenerator";
+import { httpStatusFromError } from "@/services/aso/generationLock";
 
 const router = express.Router();
 
@@ -31,7 +32,8 @@ export default router.post(
         endSse(res);
         return;
       }
-      res.status(400).send(error(u.error(e).message));
+      const status = httpStatusFromError(e);
+      res.status(status).send(apiError(u.error(e).message, status));
     }
   },
 );

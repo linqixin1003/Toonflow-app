@@ -10,7 +10,7 @@ import {
   updateOutputState,
   getWorkspace,
 } from "./workspace";
-import { acquirePlanGeneration, releasePlanGeneration, assertNoVariantInProgress } from "./generationLock";
+import { acquirePlanGeneration, releasePlanGeneration, acquireVariantGeneration } from "./generationLock";
 import { nextEntityId, nextEntityIds } from "./id";
 import type { AsoPlan } from "./types";
 
@@ -215,54 +215,67 @@ export async function scheduleVariantGeneration(options: {
 }): Promise<{ taskIds: number[]; assetIds: number[] }> {
   const { projectId, sourceAssetId, copy, count } = options;
   await assertAsoProject(projectId);
-  await assertNoVariantInProgress(projectId, sourceAssetId);
-  const source = await loadSourceMaterial(projectId, sourceAssetId);
+  const releaseVariant = await acquireVariantGeneration(projectId, sourceAssetId);
+  let jobsScheduled = 0;
+  try {
+    const source = await loadSourceMaterial(projectId, sourceAssetId);
+    const project = await u.db("o_project").where("id", projectId).first();
+    if (!project?.imageModel) throw new Error("请先配置项目 imageModel");
 
-  const project = await u.db("o_project").where("id", projectId).first();
-  if (!project?.imageModel) throw new Error("请先配置项目 imageModel");
+    const modelLabel = project.imageModel.split(/:(.+)/)[1] || project.imageModel;
+    const assetIds = nextEntityIds(count);
+    const taskIds: number[] = [];
+    let remaining = count;
+    const onJobFinished = () => {
+      remaining -= 1;
+      if (remaining <= 0) releaseVariant();
+    };
 
-  const modelLabel = project.imageModel.split(/:(.+)/)[1] || project.imageModel;
-  const assetIds = nextEntityIds(count);
-  const taskIds: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const assetId = assetIds[i];
+      const [imageId] = await u.db("o_image").insert({
+        assetsId: assetId,
+        type: "aso_material",
+        state: "生成中",
+      });
 
-  for (let i = 0; i < count; i++) {
-    const assetId = assetIds[i];
-    const [imageId] = await u.db("o_image").insert({
-      assetsId: assetId,
-      type: "aso_material",
-      state: "生成中",
-    });
-
-    await u.db("o_assets").insert({
-      id: assetId,
-      projectId,
-      type: "aso_material",
-      name: `变体-${source.name || sourceAssetId}-${i + 1}`,
-      describe: copy,
-      remark: `variant:${sourceAssetId}`,
-      imageId,
-    });
-
-    const done = await u.task(projectId, "ASO参考图变体", modelLabel, {
-      describe: `变体 ${i + 1}/${count}（素材 #${sourceAssetId}）`,
-      content: { sourceAssetId, assetId, imageId },
-    });
-
-    taskIds.push((done as typeof done & { taskId: number }).taskId);
-
-    setImmediate(() => {
-      runVariantJob({
+      await u.db("o_assets").insert({
+        id: assetId,
         projectId,
-        sourceAssetId,
-        copy,
-        assetId,
+        type: "aso_material",
+        name: `变体-${source.name || sourceAssetId}-${i + 1}`,
+        describe: copy,
+        remark: `variant:${sourceAssetId}`,
         imageId,
-        index: i,
-        total: count,
-        done,
-      }).catch((e) => console.error("[ASO参考图变体]", u.error(e).message));
-    });
-  }
+      });
 
-  return { taskIds, assetIds: assetIds.slice() };
+      const done = await u.task(projectId, "ASO参考图变体", modelLabel, {
+        describe: `变体 ${i + 1}/${count}（素材 #${sourceAssetId}）`,
+        content: { sourceAssetId, assetId, imageId },
+      });
+
+      taskIds.push((done as typeof done & { taskId: number }).taskId);
+      jobsScheduled += 1;
+
+      setImmediate(() => {
+        runVariantJob({
+          projectId,
+          sourceAssetId,
+          copy,
+          assetId,
+          imageId,
+          index: i,
+          total: count,
+          done,
+        })
+          .catch((err) => console.error("[ASO参考图变体]", u.error(err).message))
+          .finally(onJobFinished);
+      });
+    }
+
+    return { taskIds, assetIds: assetIds.slice() };
+  } catch (e) {
+    if (jobsScheduled === 0) releaseVariant();
+    throw e;
+  }
 }

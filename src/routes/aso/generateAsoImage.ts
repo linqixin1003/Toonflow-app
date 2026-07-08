@@ -1,10 +1,11 @@
 import express from "express";
 import { z } from "zod";
 import u from "@/utils";
-import { success, error } from "@/lib/responseFormat";
+import { success, apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject, getWorkspace, appendOutput } from "@/services/aso/workspace";
 import { acquirePlanGeneration, releasePlanGeneration, resolvePreset, runGenerateJob } from "@/services/aso/imageGenerator";
+import { httpStatusFromError } from "@/services/aso/generationLock";
 import { nextEntityId } from "@/services/aso/id";
 
 const router = express.Router();
@@ -29,7 +30,7 @@ export default router.post(
       const plan = workspace.plans.find((p) => p.id === planId);
       if (!plan) {
         releasePlanGeneration(projectId, planId);
-        return res.status(404).send(error("方案不存在"));
+        return res.status(404).send(apiError("方案不存在", 404));
       }
 
       const preset = resolvePreset(presetId || workspace.outputSizePreset);
@@ -89,8 +90,8 @@ export default router.post(
       );
     } catch (e) {
       if (lockHeld) releasePlanGeneration(projectId, planId);
-      const status = (e as any).statusCode === 409 ? 409 : 400;
-      res.status(status).send(error(u.error(e).message));
+      const status = httpStatusFromError(e);
+      res.status(status).send(apiError(u.error(e).message, status));
     }
   },
 );

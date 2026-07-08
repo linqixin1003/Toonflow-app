@@ -1,10 +1,11 @@
 import express from "express";
 import { z } from "zod";
 import u from "@/utils";
-import { success, error } from "@/lib/responseFormat";
+import { success, apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject, getWorkspace } from "@/services/aso/workspace";
 import { generatePlansSync, validatePlanInput } from "@/services/aso/planGenerator";
+import { httpStatusFromError } from "@/services/aso/generationLock";
 
 const router = express.Router();
 
@@ -26,7 +27,8 @@ export default router.post(
       const workspace = await getWorkspace(projectId);
       res.status(200).send(success({ plans, workspace, visionFallback }));
     } catch (e) {
-      res.status(400).send(error(u.error(e).message));
+      const status = httpStatusFromError(e);
+      res.status(status).send(apiError(u.error(e).message, status));
     }
   },
 );
