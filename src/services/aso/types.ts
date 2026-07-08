@@ -50,7 +50,7 @@ export function createDefaultAsoWorkspace(): AsoWorkspace {
   return {
     version: 1,
     inputText: "",
-    planCount: 3,
+    planCount: 1,
     plans: [],
     selectedPlanId: null,
     referencedAssetIds: [],

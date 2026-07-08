@@ -114,7 +114,6 @@ export async function runGenerateJob(job: GenerateAsoImageJob) {
       state: "已完成",
       filePath: finalRel,
       resolution: `${preset.width}x${preset.height}`,
-      prompt,
       errorReason: null,
     });
 
@@ -195,7 +194,6 @@ export async function runVariantJob(job: VariantJob) {
     await u.db("o_image").where("id", imageId).update({
       state: "已完成",
       filePath: savePath,
-      prompt,
       errorReason: null,
     });
     await done(1);

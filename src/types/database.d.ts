@@ -84,7 +84,6 @@ export interface o_image {
   'filePath'?: string | null;
   'id'?: number;
   'model'?: string | null;
-  'prompt'?: string | null;
   'resolution'?: string | null;
   'state'?: string | null;
   'type'?: string | null;
