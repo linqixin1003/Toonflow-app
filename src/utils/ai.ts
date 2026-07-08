@@ -8,6 +8,7 @@ type AiType =
   | "scriptAgent"
   | "productionAgent"
   | "universalAi"
+  | "asoVisionAi"
   | "scriptAgent:decisionAgent"
   | "scriptAgent:supervisionAgent"
   | "scriptAgent:storySkeletonAgent"
@@ -42,7 +43,9 @@ const AiTypeValues: AiType[] = [
   "productionAgent:storyboardPanelAgent",
   "productionAgent:storyboardTableAgent",
   "universalAi",
+  "asoVisionAi",
 ];
+
 async function resolveModelName(value: AiType | `${string}:${string}`): Promise<`${string}:${string}`> {
   if (AiTypeValues.includes(value as AiType)) {
     const agentUseModeVal = await u.db("o_setting").where("key", "agentUseMode").first();

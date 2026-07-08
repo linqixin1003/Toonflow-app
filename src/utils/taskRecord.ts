@@ -49,7 +49,7 @@ export default async function taskRecord(
   });
 
   /** 任务成功时调用 done(1)，失败时调用 done(-1, '原因') */
-  return async function done(state: 1 | -1, reason?: string) {
+  const done = async function done(state: 1 | -1, reason?: string) {
     await db("o_tasks")
       .where("id", id)
       .update({
@@ -57,4 +57,6 @@ export default async function taskRecord(
         reason: state === -1 ? (reason ?? "") : null,
       });
   };
+  (done as typeof done & { taskId: number }).taskId = id;
+  return done;
 }

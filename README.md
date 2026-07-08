@@ -552,6 +552,10 @@ pm2 monit             # 监控面板
 
 前端构建后，将 `dist` 目录内容复制到本项目的 `data/web` 目录即可集成。
 
+### ASO 创作（本 fork）
+
+本 fork 新增 **ASO 创作**项目类型（`projectType=aso`），API 位于 `/api/aso/*`。需在设置中心配置 **ASO 图片理解（asoVisionAi）** 与项目 **imageModel**。详见 `specs/001-aso-creation/` 与 `CHANGELOG.md`。
+
 ## 项目结构
 
 ```
