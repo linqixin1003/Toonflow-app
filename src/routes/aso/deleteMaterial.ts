@@ -31,6 +31,10 @@ export default router.post(
             : Promise.resolve(),
         ),
       );
+      const imageIds = images.map((img) => img.id).filter(Boolean);
+      if (imageIds.length) {
+        await u.db("o_assets").whereIn("imageId", imageIds).update({ imageId: null });
+      }
       await u.db("o_image").where("assetsId", assetId).delete();
       await u.db("o_assets").where("id", assetId).delete();
       await syncReferencedAssets(projectId, assetId, "remove");

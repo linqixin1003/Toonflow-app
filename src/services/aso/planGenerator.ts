@@ -161,7 +161,8 @@ export async function buildVisionMessages(
 
 export function parsePlansFromText(text: string, planCount: number): AsoPlan[] {
   const now = Date.now();
-  const trimmed = text.trim();
+  let trimmed = text.trim();
+  trimmed = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
   const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
   if (jsonMatch) {
