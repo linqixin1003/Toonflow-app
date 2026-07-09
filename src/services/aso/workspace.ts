@@ -1,5 +1,5 @@
 import u from "@/utils";
-import { isAsoProject } from "@/constants/projectTypes";
+import { isAsoProject, isCreativeProject, isUiuxProject } from "@/constants/projectTypes";
 import { nextEntityId } from "./id";
 import {
   AsoOutputRecord,
@@ -62,6 +62,20 @@ export async function assertAsoProject(projectId: number) {
   return project;
 }
 
+export async function assertUiuxProject(projectId: number) {
+  const project = await fetchProject(projectId);
+  if (!project) throw new Error("项目不存在");
+  if (!isUiuxProject(project.projectType)) throw new Error("该项目不是 UI-UX 类型");
+  return project;
+}
+
+export async function assertCreativeProject(projectId: number) {
+  const project = await fetchProject(projectId);
+  if (!project) throw new Error("项目不存在");
+  if (!isCreativeProject(project.projectType)) throw new Error("该项目不是创作类型（ASO/UI-UX）");
+  return project;
+}
+
 export function getDefaultWorkspace(): AsoWorkspace {
   return createDefaultAsoWorkspace();
 }
@@ -87,7 +101,7 @@ async function persistWorkspace(projectId: number, workspace: AsoWorkspace) {
 }
 
 export async function getOrCreateWorkspace(projectId: number): Promise<AsoWorkspace> {
-  await assertAsoProject(projectId);
+  await assertCreativeProject(projectId);
   const row = await u.db("o_agentWorkData").where({ projectId, key: ASO_WORKSPACE_KEY }).first();
   if (row?.data) return parseWorkspace(row.data);
   const workspace = getDefaultWorkspace();
@@ -96,14 +110,14 @@ export async function getOrCreateWorkspace(projectId: number): Promise<AsoWorksp
 }
 
 export async function getWorkspace(projectId: number): Promise<AsoWorkspace> {
-  await assertAsoProject(projectId);
+  await assertCreativeProject(projectId);
   const row = await u.db("o_agentWorkData").where({ projectId, key: ASO_WORKSPACE_KEY }).first();
   if (!row) return getOrCreateWorkspace(projectId);
   return parseWorkspace(row.data);
 }
 
 export async function patchWorkspace(projectId: number, partial: Partial<AsoWorkspace>): Promise<AsoWorkspace> {
-  await assertAsoProject(projectId);
+  await assertCreativeProject(projectId);
   const current = await getOrCreateWorkspace(projectId);
   const merged = AsoWorkspaceSchema.parse({
     ...current,
@@ -159,7 +173,7 @@ export async function updateOutputState(
 }
 
 export async function removeOutput(projectId: number, imageId: number): Promise<AsoWorkspace> {
-  await assertAsoProject(projectId);
+  await assertCreativeProject(projectId);
   const workspace = await getOrCreateWorkspace(projectId);
   const output = workspace.outputs.find((o) => o.imageId === imageId);
   if (!output) throw new Error("成品不存在");

@@ -185,6 +185,22 @@ import route181 from "./routes/task/getTaskApi";
 import route182 from "./routes/task/getTaskCategories";
 import route183 from "./routes/task/taskDetails";
 import route184 from "./routes/test/test";
+import route185 from "./routes/uiux/createTextMaterial";
+import route186 from "./routes/uiux/deleteMaterial";
+import route187 from "./routes/uiux/deleteOutput";
+import route188 from "./routes/uiux/editOutput";
+import route189 from "./routes/uiux/generateImage";
+import route190 from "./routes/uiux/generatePlans";
+import route191 from "./routes/uiux/generatePlans/stream";
+import route192 from "./routes/uiux/generateRefVariants";
+import route193 from "./routes/uiux/getSizePresets";
+import route194 from "./routes/uiux/getWorkspace";
+import route195 from "./routes/uiux/listMaterials";
+import route196 from "./routes/uiux/optimizePrompt";
+import route197 from "./routes/uiux/pollingOutputs";
+import route198 from "./routes/uiux/saveWorkspace";
+import route199 from "./routes/uiux/updatePlan";
+import route200 from "./routes/uiux/uploadMaterial";
 
 export default async (app: Express) => {
   app.use("/api/agents/clearMemory", route1);
@@ -371,4 +387,20 @@ export default async (app: Express) => {
   app.use("/api/task/getTaskCategories", route182);
   app.use("/api/task/taskDetails", route183);
   app.use("/api/test/test", route184);
+  app.use("/api/uiux/createTextMaterial", route185);
+  app.use("/api/uiux/deleteMaterial", route186);
+  app.use("/api/uiux/deleteOutput", route187);
+  app.use("/api/uiux/editOutput", route188);
+  app.use("/api/uiux/generateImage", route189);
+  app.use("/api/uiux/generatePlans", route190);
+  app.use("/api/uiux/generatePlans/stream", route191);
+  app.use("/api/uiux/generateRefVariants", route192);
+  app.use("/api/uiux/getSizePresets", route193);
+  app.use("/api/uiux/getWorkspace", route194);
+  app.use("/api/uiux/listMaterials", route195);
+  app.use("/api/uiux/optimizePrompt", route196);
+  app.use("/api/uiux/pollingOutputs", route197);
+  app.use("/api/uiux/saveWorkspace", route198);
+  app.use("/api/uiux/updatePlan", route199);
+  app.use("/api/uiux/uploadMaterial", route200);
 }

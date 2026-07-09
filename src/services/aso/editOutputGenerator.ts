@@ -7,13 +7,17 @@ import { appendOutput, getWorkspace, updateOutputState } from "./workspace";
 import { loadAssetReferences, resolvePreset } from "./imageGenerator";
 import { nextEntityId } from "./id";
 import { resolveNextEditTag } from "./editOutputNaming";
+import { isUiuxProject } from "@/constants/projectTypes";
 import { releaseOutputEdit, withEditTagLock } from "./generationLock";
 
-export function buildEditPrompt(instruction: string): string {
+export function buildEditPrompt(instruction: string, projectType?: string): string {
   const body = instruction.trim();
+  const targetLabel = isUiuxProject(projectType)
+    ? "mobile UI/UX design screen"
+    : "ASO store screenshot";
   return [
-    "Edit the attached ASO store screenshot based on the instructions below.",
-    "Keep the overall layout suitable for App Store / Google Play unless the instruction says otherwise.",
+    `Edit the attached ${targetLabel} based on the instructions below.`,
+    "Keep the overall layout suitable for the target platform unless the instruction says otherwise.",
     "Instructions:",
     body,
   ].join("\n");
@@ -28,6 +32,7 @@ export interface ScheduleAsoEditParams {
   aspectRatio: `${number}:${number}`;
   assetIds: number[];
   apply: boolean;
+  projectType?: string;
 }
 
 export interface ScheduledAsoEditOutput {
@@ -62,7 +67,7 @@ export async function loadSourceOutputImage(projectId: number, sourceImageId: nu
 }
 
 export async function scheduleAsoOutputEdit(params: ScheduleAsoEditParams): Promise<ScheduledAsoEditOutput> {
-  const { projectId, sourceImageId, prompt, apply } = params;
+  const { projectId, sourceImageId, prompt, apply, projectType } = params;
 
   const workspace = await getWorkspace(projectId);
   const output = workspace.outputs.find((o) => o.imageId === sourceImageId);
@@ -88,10 +93,11 @@ export async function scheduleAsoOutputEdit(params: ScheduleAsoEditParams): Prom
 
   await loadSourceOutputImage(projectId, sourceImageId);
 
-  const preset = resolvePreset(output.presetId);
-  const editPrompt = buildEditPrompt(prompt);
+  const preset = resolvePreset(output.presetId, projectType);
+  const editPrompt = buildEditPrompt(prompt, projectType);
   const outputAssetId = nextEntityId();
   let imageId: number | undefined;
+  const assetPrefix = isUiuxProject(projectType) ? "UIUX" : "ASO";
 
   try {
     if (apply) {
@@ -106,7 +112,7 @@ export async function scheduleAsoOutputEdit(params: ScheduleAsoEditParams): Prom
           id: outputAssetId,
           projectId,
           type: "aso_output",
-          name: `ASO-${preset.id}${slotSuffix}-${editTag}-${outputAssetId}`,
+          name: `${assetPrefix}-${preset.id}${slotSuffix}-${editTag}-${outputAssetId}`,
           remark: output.planId,
           prompt: editPrompt,
           describe: output.promptLabel?.trim() || `Edit ${editTag}`,
@@ -159,7 +165,7 @@ export async function scheduleAsoOutputEdit(params: ScheduleAsoEditParams): Prom
       id: outputAssetId,
       projectId,
       type: "aso_output",
-      name: `ASO-edit-preview-${outputAssetId}`,
+      name: `${assetPrefix}-edit-preview-${outputAssetId}`,
       remark: `edit_preview:${sourceImageId}`,
       prompt: editPrompt,
       describe: "Edit preview",
@@ -207,6 +213,7 @@ export interface EditOutputJob {
   presetId: string;
   apply: boolean;
   promptSlot?: number;
+  projectType?: string;
 }
 
 async function cleanupPreviewRecords(outputAssetId: number, imageId: number) {
@@ -228,9 +235,10 @@ export async function runEditJob(job: EditOutputJob): Promise<void> {
     presetId,
     apply,
     promptSlot,
+    projectType,
   } = job;
 
-  const preset = resolvePreset(presetId);
+  const preset = resolvePreset(presetId, projectType);
   const tempRel = `/${projectId}/aso/output/temp-edit-${uuidv4()}.png`;
   const finalRel = `/${projectId}/aso/output/${uuidv4()}.png`;
 
@@ -253,7 +261,7 @@ export async function runEditJob(job: EditOutputJob): Promise<void> {
         aspectRatio,
       },
       {
-        taskClass: "ASO图二次编辑",
+        taskClass: isUiuxProject(projectType) ? "UIUX图二次编辑" : "ASO图二次编辑",
         describe: `成品 #${sourceImageId} 二次编辑`,
         projectId,
         relatedObjects: JSON.stringify({

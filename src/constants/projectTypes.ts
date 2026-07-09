@@ -1,4 +1,4 @@
-export type ProjectTypeValue = "novel" | "script" | "aso";
+export type ProjectTypeValue = "novel" | "script" | "aso" | "uiux";
 
 export interface ProjectTypeConfig {
   value: ProjectTypeValue;
@@ -22,6 +22,11 @@ export const PROJECT_TYPES = {
     labelKey: "workbench.project.dialog.basedOnAso",
     modules: ["aso"],
   },
+  uiux: {
+    value: "uiux",
+    labelKey: "workbench.project.dialog.basedOnUiux",
+    modules: ["uiux"],
+  },
 } as const satisfies Record<ProjectTypeValue, ProjectTypeConfig>;
 
 export const PROJECT_TYPE_VALUES = Object.values(PROJECT_TYPES).map((t) => t.value);
@@ -31,7 +36,15 @@ export function isAsoProject(projectType: string | null | undefined): boolean {
 }
 
 export function isKnownProjectType(projectType: string | null | undefined): projectType is ProjectTypeValue {
-  return projectType === "novel" || projectType === "script" || projectType === "aso";
+  return projectType === "novel" || projectType === "script" || projectType === "aso" || projectType === "uiux";
+}
+
+export function isUiuxProject(projectType: string | null | undefined): boolean {
+  return projectType === "uiux";
+}
+
+export function isCreativeProject(projectType: string | null | undefined): boolean {
+  return projectType === "aso" || projectType === "uiux";
 }
 
 export function getProjectTypeConfig(projectType: string | null | undefined): ProjectTypeConfig | undefined {

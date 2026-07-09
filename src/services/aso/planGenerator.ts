@@ -10,7 +10,12 @@ import { extractNumberedPoints, slotLabelsForImagePrompts } from "./numberedPoin
 import { parseTextMaterialSlot, resolveMaterialKind } from "./materialKind";
 import type { AsoImagePrompt } from "./types";
 
-const SKILL_PATH = ["skills", "aso_plan_generation.md"] as const;
+import { isUiuxProject } from "@/constants/projectTypes";
+
+const SKILL_PATHS: Record<string, readonly string[]> = {
+  aso: ["skills", "aso_plan_generation.md"],
+  uiux: ["skills", "uiux_plan_generation.md"],
+};
 
 export type PlanMaterial = {
   id: number;
@@ -21,8 +26,10 @@ export type PlanMaterial = {
   imageBase64?: string;
 };
 
-export async function loadSkillPrompt(): Promise<string> {
-  const skillPath = path.join(u.getPath(), ...SKILL_PATH);
+export async function loadSkillPrompt(projectType?: string): Promise<string> {
+  const key = isUiuxProject(projectType) ? "uiux" : "aso";
+  const skillParts = SKILL_PATHS[key] ?? SKILL_PATHS.aso;
+  const skillPath = path.join(u.getPath(), ...skillParts);
   const raw = await fs.readFile(skillPath, "utf-8");
   return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
@@ -92,8 +99,11 @@ export function buildPlanPrompt(
   imagePromptCount: number,
   materials: PlanMaterial[],
   batch?: PlanBatchContext,
+  projectType?: string,
 ): string {
   const effectivePlanCount = batch ? 1 : planCount;
+  const creativeLabel = isUiuxProject(projectType) ? "UI/UX 设计方案" : "ASO 创意方案";
+  const screenshotLabel = isUiuxProject(projectType) ? "UI 界面截图" : "ASO 截图";
   const textMaterials = materials.filter((m) => m.materialKind === "text");
   const textBlock = textMaterials.length
     ? `\n文字素材（按出图序号补仓）：\n${textMaterials
@@ -128,7 +138,7 @@ export function buildPlanPrompt(
             ? `\n【出图提示词 — 本套须含 ${imagePromptCount} 条 imagePrompts】`
             : `\n【出图提示词矩阵 — 方案数 N=${effectivePlanCount} × 每套图数 M=${imagePromptCount} = 共 ${totalPrompts} 条 imagePrompts】`,
           `每套方案必须包含恰好 ${imagePromptCount} 条 imagePrompts（slot 从 1 到 ${imagePromptCount}）。`,
-          `每条 imagePrompt 是针对单张 ASO 截图的独立出图提示词（画面构图、UI 元素、文案、色调），与对应卖点一一对应。`,
+          `每条 imagePrompt 是针对单张${screenshotLabel}的独立出图提示词（画面构图、UI 元素、文案、色调），与对应卖点一一对应。`,
           `每条 prompt 字段须用 English，含画幅（如 9:16）、headline、device mockup 与具体 UI 描述；slot 1 优先 Hero 价值主张。`,
           batch ? "" : `各套方案的同一 slot 可以角度不同，但都必须可独立出图。`,
           `slot 与卖点对应关系：`,
@@ -156,9 +166,9 @@ export function buildPlanPrompt(
   return [
     imagePromptCount > 0
       ? batch
-        ? `请生成第 ${batch.index + 1} 套 ASO 创意方案（共需 ${batch.total} 套），本套含 ${imagePromptCount} 条出图提示词。`
-        : `请生成恰好 ${effectivePlanCount} 套 ASO 创意方案，每套含 ${imagePromptCount} 条出图提示词（共 ${totalPrompts} 条 imagePrompts）。`
-      : `请生成恰好 ${effectivePlanCount} 套 ASO 创意方案（title + copy）。方案数量 = ${effectivePlanCount}（以本字段为准）。`,
+        ? `请生成第 ${batch.index + 1} 套${creativeLabel}（共需 ${batch.total} 套），本套含 ${imagePromptCount} 条出图提示词。`
+        : `请生成恰好 ${effectivePlanCount} 套${creativeLabel}，每套含 ${imagePromptCount} 条出图提示词（共 ${totalPrompts} 条 imagePrompts）。`
+      : `请生成恰好 ${effectivePlanCount} 套${creativeLabel}（title + copy）。方案数量 = ${effectivePlanCount}（以本字段为准）。`,
     `产品/需求描述：\n${inputText.trim() || "（见参考图片与素材）"}`,
     batchBlock,
     matrixBlock,
@@ -180,8 +190,11 @@ function buildImagePromptChunkPrompt(
   slotEnd: number,
   materials: PlanMaterial[],
   slotLabels: string[],
+  projectType?: string,
 ): string {
   const chunkCount = slotEnd - slotStart + 1;
+  const creativeLabel = isUiuxProject(projectType) ? "UI/UX 设计方案" : "ASO 创意方案";
+  const screenshotLabel = isUiuxProject(projectType) ? "UI 界面截图" : "ASO 截图";
   const textMaterials = materials.filter((m) => m.materialKind === "text");
   const textBlock = textMaterials.length
     ? `\n文字素材（按出图序号补仓）：\n${textMaterials
@@ -192,11 +205,11 @@ function buildImagePromptChunkPrompt(
         .join("\n")}`
     : "";
   return [
-    `已有 ASO 创意方案框架（不要修改 title/copy，仅补充 imagePrompts）：`,
+    `已有${creativeLabel}框架（不要修改 title/copy，仅补充 imagePrompts）：`,
     `title: ${title}`,
     `copy: ${copy}`,
     `\n请仅生成 slot ${slotStart} 至 ${slotEnd} 的 imagePrompts（共 ${chunkCount} 条）。`,
-    `每条 imagePrompt 是针对单张 ASO 截图的独立出图提示词。`,
+    `每条 imagePrompt 是针对单张${screenshotLabel}的独立出图提示词。`,
     `prompt 字段须用 English，含画幅、headline、device mockup 与具体 UI 描述。`,
     `slot 与卖点对应：`,
     ...slotLabels.slice(slotStart - 1, slotEnd).map((label, i) => `  slot ${slotStart + i}: ${label}`),
@@ -482,6 +495,7 @@ export interface GeneratePlansOptions {
   assetIds: number[];
   appendPlans?: boolean;
   abortSignal?: AbortSignal;
+  projectType?: string;
 }
 
 export async function resolveAppendContext(projectId: number, planCount: number, appendPlans?: boolean) {
@@ -528,7 +542,7 @@ async function generateSinglePlanWithChunkedPrompts(
 ): Promise<AsoPlan> {
   const { inputText, imagePromptCount } = options;
   const slotLabels = slotLabelsForImagePrompts(inputText, imagePromptCount);
-  const basePrompt = buildPlanPrompt(inputText, 1, 0, materials);
+  const basePrompt = buildPlanPrompt(inputText, 1, 0, materials, undefined, options.projectType);
   const messages = await buildPlanMessages(systemPrompt, basePrompt, materials, modelKey);
 
   let skeletonText = "";
@@ -565,6 +579,7 @@ async function generateSinglePlanWithChunkedPrompts(
       slotEnd,
       materials,
       slotLabels,
+      options.projectType,
     );
     const chunkMessages = await buildPlanMessages(systemPrompt, chunkPrompt, materials, modelKey);
     const chunkCount = slotEnd - slotStart + 1;
@@ -601,7 +616,7 @@ async function generateOnePlan(
     index: planIndex,
     total: options.planCount,
     previousTitles: [...existingPlans.map((p) => p.title), ...previousPlans.map((p) => p.title)],
-  });
+  }, options.projectType);
   const messages = await buildPlanMessages(systemPrompt, userPrompt, materials, modelKey);
   const maxOutputTokens = planMaxOutputTokens(imagePromptCount);
   const result = await u.Ai.Text(modelKey).invoke({
@@ -624,7 +639,7 @@ async function runPlanGeneration(options: GeneratePlansOptions): Promise<{
   const materials = await loadMaterials(projectId, assetIds);
   const modelKey = await resolvePlanModel(materials);
   const visionFallback = modelKey === "universalAi" && materialsHaveImages(materials);
-  const systemPrompt = await loadSkillPrompt();
+  const systemPrompt = await loadSkillPrompt(options.projectType);
 
   if (shouldChunkSinglePlanImagePrompts(planCount, imagePromptCount)) {
     const plan = await generateSinglePlanWithChunkedPrompts(
@@ -640,7 +655,7 @@ async function runPlanGeneration(options: GeneratePlansOptions): Promise<{
   }
 
   if (!shouldBatchPlanGeneration(planCount, imagePromptCount)) {
-    const userPrompt = buildPlanPrompt(inputText, planCount, imagePromptCount, materials);
+    const userPrompt = buildPlanPrompt(inputText, planCount, imagePromptCount, materials, undefined, options.projectType);
     const messages = await buildPlanMessages(systemPrompt, userPrompt, materials, modelKey);
     const maxOutputTokens = planMaxOutputTokens(imagePromptCount);
     const result = await u.Ai.Text(modelKey).invoke({
@@ -703,7 +718,8 @@ export async function generatePlansSync(
       lastPlanGeneration: { status: "generating", updatedAt: Date.now() },
     });
 
-    const done = await u.task(projectId, "ASO方案生成", "asoPlan", {
+    const taskLabel = isUiuxProject(options.projectType) ? "UIUX方案生成" : "ASO方案生成";
+    const done = await u.task(projectId, taskLabel, "asoPlan", {
       describe: `生成 ${planCount} 套创意方案${options.imagePromptCount ? ` × ${options.imagePromptCount} 条出图提示词` : ""}`,
       content: { planCount, imagePromptCount: options.imagePromptCount, assetIds },
     });
@@ -743,7 +759,8 @@ export async function streamPlansToSse(res: Response, req: import("express").Req
     lastPlanGeneration: { status: "generating", updatedAt: Date.now() },
   });
 
-  const done = await u.task(projectId, "ASO方案生成", "asoPlan", {
+  const streamTaskLabel = isUiuxProject(options.projectType) ? "UIUX方案生成" : "ASO方案生成";
+  const done = await u.task(projectId, streamTaskLabel, "asoPlan", {
     describe: `流式生成 ${planCount} 套创意方案${imagePromptCount ? ` × ${imagePromptCount} 条出图提示词` : ""}`,
     content: { planCount, imagePromptCount, assetIds: options.assetIds },
   });
@@ -786,7 +803,8 @@ export async function streamPlansToSse(res: Response, req: import("express").Req
     const materials = await loadMaterials(projectId, options.assetIds);
     const modelKey = await resolvePlanModel(materials);
     const visionFallback = modelKey === "universalAi" && materialsHaveImages(materials);
-    const systemPrompt = await loadSkillPrompt();
+    const systemPrompt = await loadSkillPrompt(options.projectType);
+    const taskLabel = isUiuxProject(options.projectType) ? "UIUX方案生成" : "ASO方案生成";
     const useBatch = shouldBatchPlanGeneration(planCount, imagePromptCount);
     const useChunk = shouldChunkSinglePlanImagePrompts(planCount, imagePromptCount);
     const newPlans: AsoPlan[] = [];
@@ -844,7 +862,7 @@ export async function streamPlansToSse(res: Response, req: import("express").Req
     }
 
     if (!useBatch) {
-      const userPrompt = buildPlanPrompt(options.inputText, planCount, imagePromptCount, materials);
+      const userPrompt = buildPlanPrompt(options.inputText, planCount, imagePromptCount, materials, undefined, options.projectType);
       const messages = await buildPlanMessages(systemPrompt, userPrompt, materials, modelKey);
       const maxOutputTokens = planMaxOutputTokens(imagePromptCount);
 
@@ -910,7 +928,7 @@ export async function streamPlansToSse(res: Response, req: import("express").Req
         index: i,
         total: planCount,
         previousTitles: [...existingPlans.map((p) => p.title), ...newPlans.map((p) => p.title)],
-      });
+      }, options.projectType);
       const messages = await buildPlanMessages(systemPrompt, userPrompt, materials, modelKey);
       const maxOutputTokens = planMaxOutputTokens(imagePromptCount);
 

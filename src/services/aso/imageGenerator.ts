@@ -1,13 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
 import u from "@/utils";
 import { getPresetById, getDefaultPreset, type AsoSizePreset } from "@/constants/asoSizePresets";
+import { getUiuxPresetById, getDefaultUiuxPreset } from "@/constants/uiuxSizePresets";
+import { isUiuxProject } from "@/constants/projectTypes";
 import { getArtPrompt } from "@/utils/getArtPrompt";
 import { resizeImage } from "@/utils/image";
 import path from "path";
 import getPath from "@/utils/getPath";
 import {
   appendOutput,
-  assertAsoProject,
+  assertCreativeProject,
   updateOutputState,
   getWorkspace,
 } from "./workspace";
@@ -16,7 +18,10 @@ import { nextEntityId, nextEntityIds } from "./id";
 import { isTextMaterialRemark, parseTextMaterialSlot } from "./materialKind";
 import type { AsoPlan } from "./types";
 
-export function resolvePreset(presetId?: string): AsoSizePreset {
+export function resolvePreset(presetId?: string, projectType?: string): AsoSizePreset {
+  if (isUiuxProject(projectType)) {
+    return getUiuxPresetById(presetId || "") ?? getDefaultUiuxPreset();
+  }
   return getPresetById(presetId || "") ?? getDefaultPreset();
 }
 
@@ -64,14 +69,17 @@ export function buildImagePrompt(
   preset: AsoSizePreset,
   textLines: string[],
   promptSlot?: number,
+  projectType?: string,
 ): string {
   const textBlock = textLines.length ? `\n素材描述：\n${textLines.map((t) => `- ${t}`).join("\n")}` : "";
+  const outputLabel = isUiuxProject(projectType) ? "UI/UX 界面设计稿" : "ASO 商店宣传图";
   let creativeBody: string;
   if (promptSlot != null && plan.imagePrompts?.length) {
     const ip = plan.imagePrompts.find((p) => p.slot === promptSlot);
     if (ip) {
+      const promptLabel = isUiuxProject(projectType) ? "UI/UX 界面设计稿" : "ASO 宣传图";
       creativeBody = [
-        `本张 ASO 宣传图出图提示词 [${ip.slot}]${ip.label ? ` ${ip.label}` : ""}:`,
+        `本张${promptLabel}出图提示词 [${ip.slot}]${ip.label ? ` ${ip.label}` : ""}:`,
         ip.prompt,
         plan.copy ? `\n方案正文参考：${plan.copy}` : "",
       ].join("\n");
@@ -86,12 +94,14 @@ export function buildImagePrompt(
     creativeBody = `创意正文：${plan.copy}`;
   }
   return [
-    `生成 ASO 商店宣传图，尺寸目标 ${preset.width}x${preset.height}（${preset.label}）。`,
+    `生成${outputLabel}，尺寸目标 ${preset.width}x${preset.height}（${preset.label}）。`,
     `画风：${resolveArtStyleDescription(project.artStyle)}`,
     `创意标题：${plan.title}`,
     creativeBody,
     textBlock,
-    "要求：清晰可读的文字排版，适合 App Store / Google Play 展示，无违规内容。",
+    isUiuxProject(projectType)
+      ? "要求：高保真移动端 UI 设计，遵循平台设计规范，像素级精确，无占位符文本。"
+      : "要求：清晰可读的文字排版，适合 App Store / Google Play 展示，无违规内容。",
   ].join("\n");
 }
 
@@ -103,6 +113,7 @@ export interface GenerateAsoImageJob {
   outputAssetId: number;
   imageId: number;
   promptSlot?: number;
+  projectType?: string;
 }
 
 export interface ScheduleAsoOutputParams {
@@ -112,6 +123,7 @@ export interface ScheduleAsoOutputParams {
   assetIds: number[];
   promptSlot?: number;
   promptLabel?: string;
+  projectType?: string;
 }
 
 export interface ScheduledAsoOutput {
@@ -126,14 +138,14 @@ export interface ScheduledAsoOutput {
 }
 
 export async function scheduleAsoOutputGeneration(params: ScheduleAsoOutputParams): Promise<ScheduledAsoOutput> {
-  const { projectId, planId, presetId, promptSlot, promptLabel } = params;
+  const { projectId, planId, presetId, promptSlot, promptLabel, projectType } = params;
   await acquireOutputGeneration(projectId, planId, promptSlot);
 
   let outputAssetId: number | undefined;
   let imageId: number | undefined;
 
   try {
-    const preset = resolvePreset(presetId);
+    const preset = resolvePreset(presetId, projectType);
     const workspace = await getWorkspace(projectId);
     const plan = workspace.plans.find((p) => p.id === planId);
     if (!plan) {
@@ -142,11 +154,12 @@ export async function scheduleAsoOutputGeneration(params: ScheduleAsoOutputParam
 
     const slotSuffix = promptSlot != null ? `-s${promptSlot}` : "";
     outputAssetId = nextEntityId();
+    const outputLabel = isUiuxProject(projectType) ? "UIUX" : "ASO";
     await u.db("o_assets").insert({
       id: outputAssetId,
       projectId,
       type: "aso_output",
-      name: `ASO-${preset.id}${slotSuffix}-${outputAssetId}`,
+      name: `${outputLabel}-${preset.id}${slotSuffix}-${outputAssetId}`,
       remark: planId,
       prompt: plan.copy,
       describe: promptLabel?.trim() || plan.title,
@@ -201,8 +214,8 @@ export async function scheduleAsoOutputGeneration(params: ScheduleAsoOutputParam
 }
 
 export async function runGenerateJob(job: GenerateAsoImageJob) {
-  const { projectId, planId, presetId, assetIds, imageId, promptSlot } = job;
-  const preset = resolvePreset(presetId);
+  const { projectId, planId, presetId, assetIds, imageId, promptSlot, projectType } = job;
+  const preset = resolvePreset(presetId, projectType);
   const project = await u.db("o_project").where("id", projectId).first();
   const workspace = await getWorkspace(projectId);
   const plan = workspace.plans.find((p) => p.id === planId);
@@ -212,13 +225,14 @@ export async function runGenerateJob(job: GenerateAsoImageJob) {
   }
 
   const { referenceList, textLines } = await loadAssetReferences(projectId, assetIds, promptSlot);
-  const prompt = buildImagePrompt(plan, project, preset, textLines, promptSlot);
+  const prompt = buildImagePrompt(plan, project, preset, textLines, promptSlot, projectType);
   const tempRel = `/${projectId}/aso/output/temp-${uuidv4()}.png`;
   const finalRel = `/${projectId}/aso/output/${uuidv4()}.png`;
 
   try {
     if (!project?.imageModel) throw new Error("请先配置项目 imageModel");
     const aiImage = u.Ai.Image(project.imageModel as `${string}:${string}`);
+    const imgTaskLabel = isUiuxProject(projectType) ? "UIUX图生成" : "ASO图生成";
     await aiImage.run(
       {
         prompt,
@@ -227,7 +241,7 @@ export async function runGenerateJob(job: GenerateAsoImageJob) {
         aspectRatio: preset.aspectRatio,
       },
       {
-        taskClass: "ASO图生成",
+        taskClass: imgTaskLabel,
         describe: `方案 ${planId} → ${preset.width}x${preset.height}`,
         projectId,
         relatedObjects: JSON.stringify({ projectId, planId, presetId, assetIds, promptSlot }),
@@ -295,13 +309,17 @@ export interface VariantJob {
   done: (state: 1 | -1, reason?: string) => Promise<void>;
 }
 
-function buildVariantPrompt(copy: string, artStyle: string | null | undefined, sourceName: string) {
+function buildVariantPrompt(copy: string, artStyle: string | null | undefined, sourceName: string, projectType?: string) {
+  const outputLabel = isUiuxProject(projectType) ? "UI/UX 设计素材图" : "ASO 宣传素材图";
+  const displayTarget = isUiuxProject(projectType)
+    ? "适合移动端 UI 设计展示，不要直接复制原图像素。"
+    : "适合 App Store / Google Play 展示，不要直接复制原图像素。";
   return [
-    "参考附件图片的视觉风格、构图与色调，生成一张新的 ASO 宣传素材图。",
+    `参考附件图片的视觉风格、构图与色调，生成一张新的${outputLabel}。`,
     `创意说明：${copy}`,
     `参考素材：${sourceName}`,
     `画风：${resolveArtStyleDescription(artStyle)}`,
-    "要求：适合 App Store / Google Play 展示，不要直接复制原图像素。",
+    `要求：${displayTarget}`,
   ].join("\n");
 }
 
@@ -315,7 +333,7 @@ export async function runVariantJob(job: VariantJob) {
 
     const source = await loadSourceMaterial(projectId, sourceAssetId);
     const dataUrl = await u.oss.getImageBase64(source.filePath);
-    const prompt = buildVariantPrompt(copy, project.artStyle, source.name || `#${sourceAssetId}`);
+    const prompt = buildVariantPrompt(copy, project.artStyle, source.name || `#${sourceAssetId}`, project.projectType ?? undefined);
 
     const aiImage = u.Ai.Image(project.imageModel as `${string}:${string}`);
     await aiImage.run({
@@ -347,7 +365,7 @@ export async function scheduleVariantGeneration(options: {
   count: number;
 }): Promise<{ taskIds: number[]; assetIds: number[] }> {
   const { projectId, sourceAssetId, copy, count } = options;
-  await assertAsoProject(projectId);
+  await assertCreativeProject(projectId);
   const releaseVariant = await acquireVariantGeneration(projectId, sourceAssetId);
   let jobsScheduled = 0;
   try {
@@ -382,7 +400,8 @@ export async function scheduleVariantGeneration(options: {
         imageId,
       });
 
-      const done = await u.task(projectId, "ASO参考图变体", modelLabel, {
+      const variantTaskLabel = isUiuxProject(project.projectType) ? "UIUX参考图变体" : "ASO参考图变体";
+      const done = await u.task(projectId, variantTaskLabel, modelLabel, {
         describe: `变体 ${i + 1}/${count}（素材 #${sourceAssetId}）`,
         content: { sourceAssetId, assetId, imageId },
       });

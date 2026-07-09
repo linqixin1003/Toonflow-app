@@ -3,7 +3,7 @@ import { z } from "zod";
 import u from "@/utils";
 import { success, apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
-import { assertAsoProject } from "@/services/aso/workspace";
+import { assertUiuxProject } from "@/services/aso/workspace";
 import { runEditJob, scheduleAsoOutputEdit } from "@/services/aso/editOutputGenerator";
 import { acquireOutputEdit, httpStatusFromError } from "@/services/aso/generationLock";
 
@@ -11,7 +11,7 @@ const router = express.Router();
 
 function queueEditJob(job: Parameters<typeof runEditJob>[0]) {
   setImmediate(() => {
-    runEditJob(job).catch((e) => console.error("[ASO图二次编辑]", u.error(e).message));
+    runEditJob(job).catch((e) => console.error("[UIUX图二次编辑]", u.error(e).message));
   });
 }
 
@@ -43,7 +43,7 @@ export default router.post(
     let jobQueued = false;
 
     try {
-      await assertAsoProject(projectId);
+      await assertUiuxProject(projectId);
 
       const project = await u.db("o_project").where("id", projectId).first();
       const modelKey = (model || project?.imageModel) as `${string}:${string}` | undefined;
@@ -62,7 +62,7 @@ export default router.post(
       }
 
       const { resolvePreset } = await import("@/services/aso/imageGenerator");
-      const preset = resolvePreset(output.presetId);
+      const preset = resolvePreset(output.presetId, "uiux");
       const sizeTier = quality ?? preset.sizeTier;
       const ratio = (aspectRatio ?? preset.aspectRatio) as `${number}:${number}`;
       const assetIds = extraAssetIds ?? workspace.referencedAssetIds ?? [];
@@ -76,7 +76,7 @@ export default router.post(
         aspectRatio: ratio,
         assetIds,
         apply,
-        projectType: "aso",
+        projectType: "uiux",
       });
 
       queueEditJob({
@@ -92,7 +92,7 @@ export default router.post(
         presetId: scheduled.presetId,
         apply,
         promptSlot: scheduled.promptSlot,
-        projectType: "aso",
+        projectType: "uiux",
       });
       jobQueued = true;
 
