@@ -86,7 +86,7 @@ try {
             artStyle       = "realistic"
             directorManual = ""
             videoRatio     = "16:9"
-            imageModel     = "suxi:gpt-image-2"
+            imageModel     = "suxi:gpt-image-2-all"
             videoModel     = "volcengine:doubao-seedance-2-0-fast-260128"
             imageQuality   = "2K"
             mode           = "standard"

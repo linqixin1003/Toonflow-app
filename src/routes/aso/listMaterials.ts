@@ -4,6 +4,7 @@ import u from "@/utils";
 import { success } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject } from "@/services/aso/workspace";
+import { resolveMaterialKind, parseTextMaterialSlot } from "@/services/aso/materialKind";
 
 const router = express.Router();
 
@@ -38,10 +39,13 @@ export default router.post(
         id: row.id,
         name: row.name,
         type: row.type,
-        materialKind: row.filePath ? "image" : "text",
+        materialKind: resolveMaterialKind(row),
+        promptSlot: parseTextMaterialSlot(row.remark),
         describe: row.describe,
+        remark: row.remark,
         imageId: row.imageId,
         filePath: row.filePath ? await u.oss.getSmallImageUrl(row.filePath) : null,
+        originalFilePath: row.filePath ? await u.oss.getFileUrl(row.filePath) : null,
         state: row.state,
       })),
     );

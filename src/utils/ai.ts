@@ -205,7 +205,11 @@ class AiText {
       ...input,
       model: await this.resolveModel(),
       ...(config?.temperature && { temperature: config.temperature }),
-      ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
+      ...(input.maxOutputTokens != null
+        ? { maxOutputTokens: input.maxOutputTokens }
+        : config?.maxOutputTokens != null
+          ? { maxOutputTokens: config.maxOutputTokens }
+          : {}),
     } as Parameters<typeof generateText>[0]);
   }
   async stream(input: Omit<Parameters<typeof streamText>[0], "model">) {
@@ -216,16 +220,37 @@ class AiText {
       ...input,
       model: await this.resolveModel(extractReasoningMiddleware({ tagName: "reasoning_content", separator: "\n" })),
       ...(config?.temperature && { temperature: config.temperature }),
-      ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
+      ...(input.maxOutputTokens != null
+        ? { maxOutputTokens: input.maxOutputTokens }
+        : config?.maxOutputTokens != null
+          ? { maxOutputTokens: config.maxOutputTokens }
+          : {}),
     } as Parameters<typeof streamText>[0]);
   }
 }
 
+function stripDataUrlPrefix(value: string): string {
+  return value.replace(/^data:image\/\w+;base64,/, "");
+}
+
+/** Ensure image refs are http(s) URLs or data URLs — required by OpenAI-compatible image APIs. */
+function normalizeImageRef(value: string): string {
+  const v = (value || "").trim();
+  if (!v) return v;
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^data:image\//i.test(v)) return v;
+  return `data:image/png;base64,${stripDataUrlPrefix(v)}`;
+}
+
 function referenceList2imageBase642(id: string, input: any) {
+  if (!input.referenceList?.length) return input;
+  input.referenceList = input.referenceList.map((item: any) => ({
+    ...item,
+    base64: normalizeImageRef(item.base64),
+  }));
   const version = u.vendor.getVendor(id).version;
   if (!version || isNaN(parseFloat(version)) || parseFloat(version) < 2.0) {
-    input.imageBase64 = input.referenceList.map((item: any) => item.base64);
-    return input;
+    input.imageBase64 = input.referenceList.map((item: any) => stripDataUrlPrefix(item.base64));
   }
   return input;
 }

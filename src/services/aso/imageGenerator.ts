@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import u from "@/utils";
 import { getPresetById, getDefaultPreset, type AsoSizePreset } from "@/constants/asoSizePresets";
+import { getArtPrompt } from "@/utils/getArtPrompt";
 import { resizeImage } from "@/utils/image";
 import path from "path";
 import getPath from "@/utils/getPath";
@@ -10,22 +11,23 @@ import {
   updateOutputState,
   getWorkspace,
 } from "./workspace";
-import { acquirePlanGeneration, releasePlanGeneration, acquireVariantGeneration } from "./generationLock";
+import { acquireOutputGeneration, releaseOutputGeneration, acquireVariantGeneration } from "./generationLock";
 import { nextEntityId, nextEntityIds } from "./id";
+import { isTextMaterialRemark, parseTextMaterialSlot } from "./materialKind";
 import type { AsoPlan } from "./types";
 
 export function resolvePreset(presetId?: string): AsoSizePreset {
   return getPresetById(presetId || "") ?? getDefaultPreset();
 }
 
-export async function loadAssetReferences(projectId: number, assetIds: number[]) {
+export async function loadAssetReferences(projectId: number, assetIds: number[], promptSlot?: number) {
   const rows = await u
     .db("o_assets")
     .leftJoin("o_image", "o_assets.imageId", "o_image.id")
     .where("o_assets.projectId", projectId)
     .whereIn("o_assets.id", assetIds)
     .where("o_assets.type", "aso_material")
-    .select("o_assets.id", "o_assets.describe", "o_image.filePath");
+    .select("o_assets.id", "o_assets.describe", "o_assets.remark", "o_image.filePath");
 
   const referenceList: { type: "image"; base64: string }[] = [];
   const textLines: string[] = [];
@@ -33,9 +35,12 @@ export async function loadAssetReferences(projectId: number, assetIds: number[])
   for (const row of rows) {
     if (row.filePath) {
       const dataUrl = await u.oss.getImageBase64(row.filePath);
-      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
-      referenceList.push({ type: "image", base64 });
-    } else if (row.describe) {
+      referenceList.push({ type: "image", base64: dataUrl });
+    } else if (row.describe && isTextMaterialRemark(row.remark)) {
+      const slot = parseTextMaterialSlot(row.remark);
+      if (promptSlot != null) {
+        if (slot == null || slot !== promptSlot) continue;
+      }
       textLines.push(row.describe);
     }
   }
@@ -43,13 +48,48 @@ export async function loadAssetReferences(projectId: number, assetIds: number[])
   return { referenceList, textLines };
 }
 
-export function buildImagePrompt(plan: AsoPlan, project: any, preset: AsoSizePreset, textLines: string[]): string {
+function resolveArtStyleDescription(artStyle: string | null | undefined): string {
+  const raw = artStyle?.trim();
+  if (!raw) return "未指定";
+  const fromManual = getArtPrompt(raw, "art_skills", "art_scene").trim();
+  if (fromManual && fromManual !== "无") return fromManual;
+  const prefixOnly = getArtPrompt(raw, "art_skills", "prefix").trim();
+  if (prefixOnly) return prefixOnly;
+  return raw;
+}
+
+export function buildImagePrompt(
+  plan: AsoPlan,
+  project: any,
+  preset: AsoSizePreset,
+  textLines: string[],
+  promptSlot?: number,
+): string {
   const textBlock = textLines.length ? `\n素材描述：\n${textLines.map((t) => `- ${t}`).join("\n")}` : "";
+  let creativeBody: string;
+  if (promptSlot != null && plan.imagePrompts?.length) {
+    const ip = plan.imagePrompts.find((p) => p.slot === promptSlot);
+    if (ip) {
+      creativeBody = [
+        `本张 ASO 宣传图出图提示词 [${ip.slot}]${ip.label ? ` ${ip.label}` : ""}:`,
+        ip.prompt,
+        plan.copy ? `\n方案正文参考：${plan.copy}` : "",
+      ].join("\n");
+    } else {
+      creativeBody = `创意正文：${plan.copy}`;
+    }
+  } else if (plan.imagePrompts?.length) {
+    creativeBody = `\n分镜出图提示词（共 ${plan.imagePrompts.length} 张）：\n${plan.imagePrompts
+      .map((p) => `- [${p.slot}] ${p.label || "图" + p.slot}: ${p.prompt}`)
+      .join("\n")}`;
+  } else {
+    creativeBody = `创意正文：${plan.copy}`;
+  }
   return [
     `生成 ASO 商店宣传图，尺寸目标 ${preset.width}x${preset.height}（${preset.label}）。`,
-    `画风：${project.artStyle || "未指定"}`,
+    `画风：${resolveArtStyleDescription(project.artStyle)}`,
     `创意标题：${plan.title}`,
-    `创意正文：${plan.copy}`,
+    creativeBody,
     textBlock,
     "要求：清晰可读的文字排版，适合 App Store / Google Play 展示，无违规内容。",
   ].join("\n");
@@ -62,21 +102,117 @@ export interface GenerateAsoImageJob {
   assetIds: number[];
   outputAssetId: number;
   imageId: number;
+  promptSlot?: number;
+}
+
+export interface ScheduleAsoOutputParams {
+  projectId: number;
+  planId: string;
+  presetId: string;
+  assetIds: number[];
+  promptSlot?: number;
+  promptLabel?: string;
+}
+
+export interface ScheduledAsoOutput {
+  outputAssetId: number;
+  imageId: number;
+  state: "生成中";
+  presetId: string;
+  width: number;
+  height: number;
+  promptSlot?: number;
+  promptLabel?: string;
+}
+
+export async function scheduleAsoOutputGeneration(params: ScheduleAsoOutputParams): Promise<ScheduledAsoOutput> {
+  const { projectId, planId, presetId, promptSlot, promptLabel } = params;
+  await acquireOutputGeneration(projectId, planId, promptSlot);
+
+  let outputAssetId: number | undefined;
+  let imageId: number | undefined;
+
+  try {
+    const preset = resolvePreset(presetId);
+    const workspace = await getWorkspace(projectId);
+    const plan = workspace.plans.find((p) => p.id === planId);
+    if (!plan) {
+      throw new Error("方案不存在");
+    }
+
+    const slotSuffix = promptSlot != null ? `-s${promptSlot}` : "";
+    outputAssetId = nextEntityId();
+    await u.db("o_assets").insert({
+      id: outputAssetId,
+      projectId,
+      type: "aso_output",
+      name: `ASO-${preset.id}${slotSuffix}-${outputAssetId}`,
+      remark: planId,
+      prompt: plan.copy,
+      describe: promptLabel?.trim() || plan.title,
+    });
+
+    const insertedImageIds = await u.db("o_image").insert({
+      assetsId: outputAssetId,
+      type: "aso_output",
+      state: "生成中",
+      resolution: `${preset.width}x${preset.height}`,
+    });
+    imageId = insertedImageIds[0];
+    if (imageId == null) {
+      throw new Error("创建出图记录失败");
+    }
+
+    await u.db("o_assets").where("id", outputAssetId).update({ imageId });
+
+    await appendOutput(projectId, {
+      planId,
+      assetId: outputAssetId,
+      imageId,
+      presetId: preset.id,
+      width: preset.width,
+      height: preset.height,
+      state: "生成中",
+      promptSlot,
+      promptLabel: promptLabel?.trim() || undefined,
+      createdAt: Date.now(),
+    });
+
+    return {
+      outputAssetId,
+      imageId,
+      state: "生成中",
+      presetId: preset.id,
+      width: preset.width,
+      height: preset.height,
+      promptSlot,
+      promptLabel: promptLabel?.trim() || undefined,
+    };
+  } catch (e) {
+    if (imageId != null) {
+      await u.db("o_image").where("id", imageId).delete().catch(() => undefined);
+    }
+    if (outputAssetId != null) {
+      await u.db("o_assets").where("id", outputAssetId).delete().catch(() => undefined);
+    }
+    releaseOutputGeneration(projectId, planId, promptSlot);
+    throw e;
+  }
 }
 
 export async function runGenerateJob(job: GenerateAsoImageJob) {
-  const { projectId, planId, presetId, assetIds, imageId } = job;
+  const { projectId, planId, presetId, assetIds, imageId, promptSlot } = job;
   const preset = resolvePreset(presetId);
   const project = await u.db("o_project").where("id", projectId).first();
   const workspace = await getWorkspace(projectId);
   const plan = workspace.plans.find((p) => p.id === planId);
   if (!plan) {
-    releasePlanGeneration(projectId, planId);
+    releaseOutputGeneration(projectId, planId, promptSlot);
     throw new Error("方案不存在");
   }
 
-  const { referenceList, textLines } = await loadAssetReferences(projectId, assetIds);
-  const prompt = buildImagePrompt(plan, project, preset, textLines);
+  const { referenceList, textLines } = await loadAssetReferences(projectId, assetIds, promptSlot);
+  const prompt = buildImagePrompt(plan, project, preset, textLines, promptSlot);
   const tempRel = `/${projectId}/aso/output/temp-${uuidv4()}.png`;
   const finalRel = `/${projectId}/aso/output/${uuidv4()}.png`;
 
@@ -94,7 +230,7 @@ export async function runGenerateJob(job: GenerateAsoImageJob) {
         taskClass: "ASO图生成",
         describe: `方案 ${planId} → ${preset.width}x${preset.height}`,
         projectId,
-        relatedObjects: JSON.stringify({ projectId, planId, presetId, assetIds }),
+        relatedObjects: JSON.stringify({ projectId, planId, presetId, assetIds, promptSlot }),
       },
     );
     await aiImage.save(tempRel);
@@ -124,11 +260,11 @@ export async function runGenerateJob(job: GenerateAsoImageJob) {
     await updateOutputState(projectId, imageId, { state: "生成失败", errorReason: message });
     throw e;
   } finally {
-    releasePlanGeneration(projectId, planId);
+    releaseOutputGeneration(projectId, planId, promptSlot);
   }
 }
 
-export { acquirePlanGeneration, releasePlanGeneration } from "./generationLock";
+export { acquireOutputGeneration, releaseOutputGeneration } from "./generationLock";
 
 export async function loadSourceMaterial(projectId: number, sourceAssetId: number) {
   const row = await u
@@ -164,7 +300,7 @@ function buildVariantPrompt(copy: string, artStyle: string | null | undefined, s
     "参考附件图片的视觉风格、构图与色调，生成一张新的 ASO 宣传素材图。",
     `创意说明：${copy}`,
     `参考素材：${sourceName}`,
-    `画风：${artStyle || "未指定"}`,
+    `画风：${resolveArtStyleDescription(artStyle)}`,
     "要求：适合 App Store / Google Play 展示，不要直接复制原图像素。",
   ].join("\n");
 }
@@ -179,13 +315,12 @@ export async function runVariantJob(job: VariantJob) {
 
     const source = await loadSourceMaterial(projectId, sourceAssetId);
     const dataUrl = await u.oss.getImageBase64(source.filePath);
-    const referenceBase64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
     const prompt = buildVariantPrompt(copy, project.artStyle, source.name || `#${sourceAssetId}`);
 
     const aiImage = u.Ai.Image(project.imageModel as `${string}:${string}`);
     await aiImage.run({
       prompt,
-      referenceList: [{ type: "image", base64: referenceBase64 }],
+      referenceList: [{ type: "image", base64: dataUrl }],
       size: "2K",
       aspectRatio: "1:1",
     });
@@ -255,7 +390,7 @@ export async function scheduleVariantGeneration(options: {
       taskIds.push((done as typeof done & { taskId: number }).taskId);
       jobsScheduled += 1;
 
-      setImmediate(() => {
+      setTimeout(() => {
         runVariantJob({
           projectId,
           sourceAssetId,
@@ -268,7 +403,7 @@ export async function scheduleVariantGeneration(options: {
         })
           .catch((err) => console.error("[ASO参考图变体]", u.error(err).message))
           .finally(onJobFinished);
-      });
+      }, i * 800);
     }
 
     return { taskIds, assetIds: assetIds.slice() };

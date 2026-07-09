@@ -6,18 +6,22 @@ import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject, syncReferencedAssets } from "@/services/aso/workspace";
 import { nextEntityId } from "@/services/aso/id";
 
+import { formatTextMaterialRemark } from "@/services/aso/materialKind";
+
 const router = express.Router();
 
 export default router.post(
   "/",
   validateFields({
     projectId: z.number(),
-    name: z.string(),
+    name: z.string().optional(),
     describe: z.string(),
+    promptSlot: z.number().int().min(1).max(20),
   }),
   async (req, res) => {
     try {
-      const { projectId, name, describe } = req.body;
+      const { projectId, describe, promptSlot } = req.body;
+      const name = (req.body.name as string | undefined)?.trim() || `第${promptSlot}张补仓`;
       await assertAsoProject(projectId);
       if (!describe.trim()) return res.status(400).send(error("文字描述不能为空"));
 
@@ -28,7 +32,7 @@ export default router.post(
         type: "aso_material",
         name,
         describe,
-        remark: "text",
+        remark: formatTextMaterialRemark(promptSlot),
         imageId: null,
       });
 
@@ -40,6 +44,7 @@ export default router.post(
           materialKind: "text",
           name,
           describe,
+          promptSlot,
         }),
       );
     } catch (e) {

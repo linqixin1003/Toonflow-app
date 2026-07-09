@@ -121,7 +121,7 @@ export async function setPlans(projectId: number, plans: AsoPlan[]): Promise<Aso
 export async function updatePlanById(
   projectId: number,
   planId: string,
-  patch: Partial<Pick<AsoPlan, "title" | "copy">>,
+  patch: Partial<Pick<AsoPlan, "title" | "copy" | "imagePrompts">>,
 ): Promise<AsoPlan> {
   const workspace = await getOrCreateWorkspace(projectId);
   const index = workspace.plans.findIndex((p) => p.id === planId);

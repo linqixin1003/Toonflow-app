@@ -9,6 +9,7 @@ import { AsoPlanSchema, AsoOutputRecordSchema, AsoLastPlanGenerationSchema } fro
 const patchSchema = z.object({
   inputText: z.string().optional(),
   planCount: z.number().int().min(1).max(10).optional(),
+  imagePromptCount: z.number().int().min(0).max(20).optional(),
   plans: z.array(AsoPlanSchema).optional(),
   selectedPlanId: z.string().nullable().optional(),
   referencedAssetIds: z.array(z.number()).optional(),
@@ -30,7 +31,8 @@ export default router.post(
     try {
       const { projectId, patch } = req.body;
       await assertAsoProject(projectId);
-      const workspace = await patchWorkspace(projectId, patch);
+      const { outputs: _clientOutputs, ...safePatch } = patch;
+      const workspace = await patchWorkspace(projectId, safePatch);
       res.status(200).send(success({ message: "保存成功", workspace }));
     } catch (e) {
       res.status(400).send(error(u.error(e).message));

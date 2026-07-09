@@ -21,6 +21,7 @@ export default router.post(
       .db("o_image")
       .leftJoin("o_assets", "o_image.assetsId", "o_assets.id")
       .whereIn("o_image.id", imageIds)
+      .where("o_assets.projectId", projectId)
       .select(
         "o_image.id as imageId",
         "o_image.state",
@@ -38,6 +39,7 @@ export default router.post(
           assetId: row.assetId,
           state: row.state,
           filePath: row.filePath ? await u.oss.getSmallImageUrl(row.filePath) : null,
+          originalFilePath: row.filePath ? await u.oss.getFileUrl(row.filePath) : null,
           errorReason: row.errorReason,
           width: w || undefined,
           height: h || undefined,

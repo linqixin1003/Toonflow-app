@@ -5,7 +5,8 @@ import { apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertAsoProject } from "@/services/aso/workspace";
 import { initSse, sendSseEvent, endSse } from "@/services/aso/sse";
-import { streamPlansToSse, validatePlanInput } from "@/services/aso/planGenerator";
+import { streamPlansToSse, validatePlanInput, resolveAppendContext } from "@/services/aso/planGenerator";
+import { resolveImagePromptCount } from "@/services/aso/numberedPoints";
 import { httpStatusFromError } from "@/services/aso/generationLock";
 
 const router = express.Router();
@@ -16,16 +17,27 @@ export default router.post(
     projectId: z.number(),
     inputText: z.string().optional().default(""),
     planCount: z.number().int().min(1).max(10),
+    imagePromptCount: z.number().int().min(0).max(20).optional(),
     assetIds: z.array(z.number()).optional().default([]),
+    appendPlans: z.boolean().optional().default(false),
   }),
   async (req, res) => {
     try {
-      const { projectId, inputText, planCount, assetIds } = req.body;
+      const { projectId, inputText, planCount, assetIds, appendPlans } = req.body;
+      const imagePromptCount = resolveImagePromptCount(inputText, req.body.imagePromptCount);
       await assertAsoProject(projectId);
       await validatePlanInput(projectId, inputText, assetIds);
+      await resolveAppendContext(projectId, planCount, appendPlans);
 
       initSse(res);
-      await streamPlansToSse(res, req, { projectId, inputText, planCount, assetIds });
+      await streamPlansToSse(res, req, {
+        projectId,
+        inputText,
+        planCount,
+        imagePromptCount,
+        assetIds,
+        appendPlans,
+      });
     } catch (e) {
       if (res.headersSent) {
         sendSseEvent(res, "error", { message: u.error(e).message });

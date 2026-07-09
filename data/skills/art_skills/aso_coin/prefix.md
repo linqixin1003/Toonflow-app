@@ -1,0 +1,10 @@
+Premium ASO app store screenshot, coin identification and valuation mobile app,
+vertical 9:16 iPhone mockup, matte black to charcoal gradient background,
+subtle gold ambient glow and cinematic rim lighting,
+hero object: hyper-realistic gold coin macro photography, extreme metal texture detail,
+engraved relief sharp, reflective edge highlight, shallow depth of field,
+modern minimal fintech UI overlay, gold accent buttons and tags,
+large bold English headline, small supporting caption, high legibility,
+clean layout with generous negative space, luxury collectible aesthetic,
+ultra sharp, 8K detail, professional product photography lighting,
+no watermark, no competitor logos, no clutter

@@ -69,7 +69,7 @@ python (Join-Path $PSScriptRoot "insert_suxi_vendor.py") | Out-Null
 Invoke-Api POST "/setting/vendorConfig/enableVendor" @{ id = "suxi"; enable = 1 } $token | Out-Null
 Invoke-Api POST "/setting/vendorConfig/updateVendorInputs" @{
     id          = "suxi"
-    inputValues = @{ apiKey = $SuxiKey; baseUrl = "https://new.suxi.ai/v1" }
+    inputValues = @{ apiKey = $SuxiKey; baseUrl = "https://new-us.suxi.ai/v1" }
 } $token | Out-Null
 
 Write-Host "Bind Agent slots..." -ForegroundColor Cyan
@@ -112,13 +112,13 @@ if ($aso) {
         artStyle       = $aso.artStyle
         directorManual = $aso.directorManual
         videoRatio     = "16:9"
-        imageModel     = "suxi:gpt-image-2"
+        imageModel     = "suxi:gpt-image-2-all"
         videoModel     = "volcengine:doubao-seedance-2-0-fast-260128"
         projectType    = "aso"
         imageQuality   = $aso.imageQuality
         mode           = "standard"
     } $token | Out-Null
-    Write-Host "ASO project id=$($aso.id) imageModel=suxi:gpt-image-2 videoModel=volcengine:doubao-seedance-2-0-fast-260128" -ForegroundColor Green
+    Write-Host "ASO project id=$($aso.id) imageModel=suxi:gpt-image-2-all videoModel=volcengine:doubao-seedance-2-0-fast-260128" -ForegroundColor Green
 }
 
 Write-Host "Done. Restart not required." -ForegroundColor Green

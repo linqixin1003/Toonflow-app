@@ -1,4 +1,4 @@
-# ASO API self-test — backend at http://localhost:10588
+﻿# ASO API self-test — backend at http://localhost:10588
 $ErrorActionPreference = "Stop"
 $Base = "http://localhost:10588/api"
 $Pass = 0
@@ -7,6 +7,8 @@ $Skip = 0
 $token = $null
 $projectId = $null
 $materialId = $null
+$uploadedAssetId = $null
+$uploadedImageId = $null
 
 function Test-Step {
     param([string]$Name, [scriptblock]$Block)
@@ -34,7 +36,7 @@ function Invoke-Api {
         [string]$Token = $null,
         [int]$ExpectStatus = 200
     )
-    $headers = @{ "Content-Type" = "application/json" }
+    $headers = @{ "Content-Type" = "application/json; charset=utf-8" }
     if ($Token) { $headers["Authorization"] = $Token }
     $params = @{
         Uri             = "$Base$Path"
@@ -42,7 +44,12 @@ function Invoke-Api {
         Headers         = $headers
         UseBasicParsing = $true
     }
-    if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json -Depth 10 -Compress) }
+    if ($null -ne $Body) {
+        # UTF-8 bytes: PowerShell 5.1 would otherwise send string bodies as ISO-8859-1,
+        # mangling Chinese enum values like 已完成
+        $json = $Body | ConvertTo-Json -Depth 10 -Compress
+        $params.Body = [System.Text.Encoding]::UTF8.GetBytes($json)
+    }
     try {
         $resp = Invoke-WebRequest @params
         $status = [int]$resp.StatusCode
@@ -122,9 +129,9 @@ Test-Step "T005 POST /aso/saveWorkspace" {
 
 Test-Step "T006 POST /aso/createTextMaterial" {
     $r = Invoke-Api -Method POST -Path "/aso/createTextMaterial" -Body @{
-        projectId = $projectId
-        name      = "test-material"
-        describe  = "home workout 15min"
+        projectId  = $projectId
+        describe   = "home workout 15min"
+        promptSlot = 1
     } -Token $token
     if ($r.code -ne 200 -or -not $r.data.assetId) { throw "no assetId" }
     $script:materialId = [long]$r.data.assetId
@@ -181,6 +188,152 @@ Test-Step "T008b generatePlans needs AI config (manual E2E)" {
         if ($msg -match "400") { throw "[SKIP] configure universalAi and asoVisionAi in settings" }
         throw
     }
+}
+
+Test-Step "T011 POST /aso/uploadMaterial single image" {
+    # 1x1 transparent PNG
+    $png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    $r = Invoke-Api -Method POST -Path "/aso/uploadMaterial" -Body @{
+        projectId = $projectId
+        name      = "selftest-upload"
+        base64    = $png
+    } -Token $token
+    if ($r.code -ne 200 -or -not $r.data.assetId) { throw "upload failed: $($r.message)" }
+    $script:uploadedAssetId = [long]$r.data.assetId
+    $script:uploadedImageId = [long]$r.data.imageId
+}
+
+Test-Step "T012 editAsoOutput rejects nonexistent output (404)" {
+    try {
+        Invoke-Api -Method POST -Path "/aso/editAsoOutput" -Body @{
+            projectId = $projectId
+            imageId   = 999999999
+            prompt    = "make it blue"
+            model     = "selftest:model"
+        } -Token $token -ExpectStatus 404 | Out-Null
+    } catch {
+        if ($_.Exception.Message -notmatch "404") { throw }
+    }
+}
+
+Test-Step "T013 saveWorkspace strips client outputs field" {
+    $before = (Invoke-Api -Method POST -Path "/aso/getWorkspace" -Body @{ projectId = $projectId } -Token $token).data.workspace
+    $beforeCount = @($before.outputs).Count
+    $fakeOutput = @{
+        planId    = "selftest-fake-plan"
+        assetId   = 123456789
+        imageId   = 123456789
+        presetId  = "general_vertical_1080x1920"
+        width     = 1080
+        height    = 1920
+        state     = "已完成"
+        createdAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }
+    $r = Invoke-Api -Method POST -Path "/aso/saveWorkspace" -Body @{
+        projectId = $projectId
+        patch     = @{ outputs = @($fakeOutput) }
+    } -Token $token
+    if ($r.code -ne 200) { throw $r.message }
+    $after = @($r.data.workspace.outputs)
+    if ($after.Count -ne $beforeCount) { throw "outputs count changed: $beforeCount -> $($after.Count)" }
+    if (@($after | Where-Object { $_.planId -eq "selftest-fake-plan" }).Count -gt 0) {
+        throw "client-injected output was persisted"
+    }
+}
+
+Test-Step "T014 pollingOutputs isolates by project" {
+    # own material imageId resolves; unknown id returns nothing instead of erroring
+    $r = Invoke-Api -Method POST -Path "/aso/pollingOutputs" -Body @{
+        projectId = $projectId
+        imageIds  = @($uploadedImageId, 999999999)
+    } -Token $token
+    if ($r.code -ne 200) { throw $r.message }
+    $rows = @($r.data)
+    if (@($rows | Where-Object { $_.imageId -eq $uploadedImageId }).Count -lt 1) { throw "own image not returned" }
+    if (@($rows | Where-Object { $_.imageId -eq 999999999 }).Count -gt 0) { throw "unknown image returned" }
+    # cross-project: another ASO project must NOT see this image
+    $ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Invoke-Api -Method POST -Path "/project/addProject" -Body @{
+        projectType    = "aso"
+        name           = "ASO-iso-$ts"
+        intro          = "isolation test"
+        type           = "tool"
+        artStyle       = "realistic"
+        directorManual = ""
+        videoRatio     = "16:9"
+        imageModel     = ""
+        videoModel     = ""
+        imageQuality   = "2K"
+        mode           = "standard"
+    } -Token $token | Out-Null
+    $projs = (Invoke-Api -Method POST -Path "/project/getProject" -Body @{} -Token $token).data
+    $iso = @($projs | Where-Object { $_.name -eq "ASO-iso-$ts" })[0]
+    if (-not $iso) { throw "isolation project missing" }
+    $isoId = [long]$iso.id
+    try {
+        $r2 = Invoke-Api -Method POST -Path "/aso/pollingOutputs" -Body @{
+            projectId = $isoId
+            imageIds  = @($uploadedImageId)
+        } -Token $token
+        if (@($r2.data | Where-Object { $_.imageId -eq $uploadedImageId }).Count -gt 0) {
+            throw "cross-project image leak via pollingOutputs"
+        }
+    } finally {
+        Invoke-Api -Method POST -Path "/project/delProject" -Body @{ id = $isoId } -Token $token | Out-Null
+    }
+}
+
+Test-Step "T015 edit async E2E + duplicate 409 (needs completed output)" {
+    $ws = (Invoke-Api -Method POST -Path "/aso/getWorkspace" -Body @{ projectId = $projectId } -Token $token).data.workspace
+    $doneOutput = @($ws.outputs | Where-Object { $_.state -eq "已完成" })[0]
+    if (-not $doneOutput) { throw "[SKIP] no completed output; generate an image first" }
+    $proj = (Invoke-Api -Method POST -Path "/project/getProject" -Body @{} -Token $token).data |
+        Where-Object { $_.id -eq $projectId } | Select-Object -First 1
+    if (-not $proj.imageModel) { throw "[SKIP] set project imageModel to run edit E2E" }
+
+    $srcId = [long]$doneOutput.imageId
+    $r = Invoke-Api -Method POST -Path "/aso/editAsoOutput" -Body @{
+        projectId = $projectId
+        imageId   = $srcId
+        prompt    = "selftest: slightly increase contrast"
+        apply     = $true
+    } -Token $token
+    if ($r.code -ne 200 -or $r.data.state -ne "生成中") { throw "edit not scheduled: $($r.message)" }
+    $newId = [long]$r.data.imageId
+
+    # duplicate edit on same source must be rejected while first is running
+    try {
+        Invoke-Api -Method POST -Path "/aso/editAsoOutput" -Body @{
+            projectId = $projectId
+            imageId   = $srcId
+            prompt    = "duplicate"
+            apply     = $true
+        } -Token $token -ExpectStatus 409 | Out-Null
+    } catch {
+        if ($_.Exception.Message -notmatch "409") { throw "duplicate edit not blocked: $($_.Exception.Message)" }
+    }
+
+    # poll async job until terminal state (bounded)
+    $deadline = (Get-Date).AddSeconds(180)
+    $state = "生成中"
+    while ((Get-Date) -lt $deadline -and $state -eq "生成中") {
+        Start-Sleep -Seconds 3
+        $p = Invoke-Api -Method POST -Path "/aso/pollingOutputs" -Body @{
+            projectId = $projectId
+            imageIds  = @($newId)
+        } -Token $token
+        $row = @($p.data | Where-Object { $_.imageId -eq $newId })[0]
+        if ($row) { $state = $row.state }
+    }
+    if ($state -eq "生成中") { throw "edit job did not finish within 180s" }
+    Write-Host "       edit result state=$state" -ForegroundColor DarkGray
+}
+
+Test-Step "T016 cleanup uploaded material" {
+    Invoke-Api -Method POST -Path "/aso/deleteMaterial" -Body @{
+        projectId = $projectId
+        assetId   = $uploadedAssetId
+    } -Token $token | Out-Null
 }
 
 Test-Step "T009 regression novel API reachable" {
@@ -255,9 +408,9 @@ Test-Step "T069 regression delete ASO project removes workspace" {
     $delId = [long]$delProj.id
     Invoke-Api -Method POST -Path "/aso/getWorkspace" -Body @{ projectId = $delId } -Token $token | Out-Null
     Invoke-Api -Method POST -Path "/aso/createTextMaterial" -Body @{
-        projectId = $delId
-        name      = "del-test"
-        describe  = "cleanup"
+        projectId  = $delId
+        describe   = "cleanup"
+        promptSlot = 1
     } -Token $token | Out-Null
     Invoke-Api -Method POST -Path "/project/delProject" -Body @{ id = $delId } -Token $token | Out-Null
     $r2 = Invoke-Api -Method POST -Path "/project/getProject" -Body @{} -Token $token
@@ -269,7 +422,9 @@ Test-Step "T069 regression delete ASO project removes workspace" {
 Test-Step "T010 frontend index served" {
     $r = Invoke-WebRequest -Uri "http://localhost:10588/" -UseBasicParsing
     if ($r.StatusCode -ne 200) { throw "index not 200" }
-    if ($r.Content.Length -lt 1000) { throw "index.html too small" }
+    if ($r.Content -notmatch '<div id="app">' -or $r.Content -notmatch 'assets/') {
+        throw "index.html does not look like the built SPA"
+    }
 }
 
 Write-Host ""

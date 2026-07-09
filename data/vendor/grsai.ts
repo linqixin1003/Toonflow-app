@@ -234,7 +234,13 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
 
   // 处理参考图
   if (config.referenceList && config.referenceList.length > 0) {
-    requestBody.urls = config.referenceList.map((img) => img.base64);
+    const toImagePayload = (value: string) => {
+      const v = (value || "").trim();
+      if (/^https?:\/\//i.test(v)) return v;
+      if (/^data:image\//i.test(v)) return v;
+      return `data:image/png;base64,${v.replace(/^data:image\/\w+;base64,/, "")}`;
+    };
+    requestBody.urls = config.referenceList.map((img) => toImagePayload(img.base64));
   }
 
   // 选择接口路径
