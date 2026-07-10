@@ -7,13 +7,15 @@ import { success, apiError } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { assertUiuxProject } from "@/services/aso/workspace";
 import { loadMaterials, resolvePlanModel, buildPlanMessages } from "@/services/aso/planGenerator";
+import { acquireUiuxInputOp, httpStatusFromError, releaseUiuxInputOp } from "@/services/aso/generationLock";
 
 const router = express.Router();
 
 async function loadRefinerPrompt(): Promise<string> {
   const skillPath = path.join(u.getPath(), "skills", "uiux_raw_input_analyzer.md");
   const raw = await fs.readFile(skillPath, "utf-8");
-  return raw.replace(/^---[\s\S]*?---\s*/, "").trim();
+  // Match planGenerator frontmatter strip (keep CRLF-safe)
+  return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 }
 
 export default router.post(
@@ -24,13 +26,20 @@ export default router.post(
     assetIds: z.array(z.number()).optional(),
   }),
   async (req, res) => {
+    let done: ((state: 1 | -1, reason?: string) => Promise<void>) | undefined;
     try {
       const { projectId, rawInput, assetIds = [] } = req.body;
       await assertUiuxProject(projectId);
+      acquireUiuxInputOp(projectId);
 
       const systemPrompt = await loadRefinerPrompt();
       const materials = await loadMaterials(projectId, assetIds);
       const modelKey = await resolvePlanModel(materials);
+
+      done = await u.task(projectId, "UIUX原始需求整理", modelKey, {
+        describe: "整理原始需求为创意输入",
+        content: { inputLength: rawInput.length, assetCount: assetIds.length },
+      });
 
       const userPrompt = `请整理以下原始需求为专业的 UI/UX 创意输入文档：\n\n${rawInput}`;
       const messages = await buildPlanMessages(systemPrompt, userPrompt, materials, modelKey);
@@ -40,16 +49,16 @@ export default router.post(
         maxOutputTokens: 2048,
       });
 
-      // Record task
-      await u.task(projectId, "UIUX原始需求整理", modelKey, {
-        describe: "整理原始需求为创意输入",
-        content: { inputLength: rawInput.length, assetCount: assetIds.length },
-      });
-
+      await done(1);
       res.status(200).send(success({ refinedText: text }));
     } catch (e) {
-      const status = e instanceof Error && e.message.includes("不存在") ? 404 : 400;
-      res.status(status).send(apiError(u.error(e).message, status));
+      const message = u.error(e).message;
+      await done?.(-1, message).catch(() => undefined);
+      const status = e instanceof Error && e.message.includes("不存在") ? 404 : httpStatusFromError(e);
+      res.status(status).send(apiError(message, status));
+    } finally {
+      const projectId = req.body?.projectId;
+      if (typeof projectId === "number") releaseUiuxInputOp(projectId);
     }
   },
 );

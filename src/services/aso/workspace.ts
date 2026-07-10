@@ -1,5 +1,6 @@
 import u from "@/utils";
 import { isAsoProject, isCreativeProject, isUiuxProject } from "@/constants/projectTypes";
+import { getDefaultUiuxPreset, getUiuxPresetById } from "@/constants/uiuxSizePresets";
 import { nextEntityId } from "./id";
 import {
   AsoOutputRecord,
@@ -22,13 +23,13 @@ function recoverPlans(raw: unknown): AsoPlan[] {
   return plans;
 }
 
-function parseWorkspace(raw: string | null | undefined): AsoWorkspace {
-  if (!raw) return createDefaultAsoWorkspace();
+function parseWorkspace(raw: string | null | undefined, projectType?: string | null): AsoWorkspace {
+  if (!raw) return getDefaultWorkspace(projectType);
   let obj: unknown;
   try {
     obj = JSON.parse(raw);
   } catch {
-    return createDefaultAsoWorkspace();
+    return getDefaultWorkspace(projectType);
   }
   const parsed = AsoWorkspaceSchema.safeParse(obj);
   if (parsed.success) return parsed.data;
@@ -36,7 +37,7 @@ function parseWorkspace(raw: string | null | undefined): AsoWorkspace {
   const recoveredPlans = recoverPlans((obj as { plans?: unknown })?.plans);
   if (recoveredPlans.length) {
     console.warn("[aso] workspace schema partial recovery, plans=", recoveredPlans.length);
-    const base = createDefaultAsoWorkspace();
+    const base = getDefaultWorkspace(projectType);
     const partial = {
       ...base,
       ...(typeof obj === "object" && obj ? obj : {}),
@@ -48,7 +49,29 @@ function parseWorkspace(raw: string | null | undefined): AsoWorkspace {
   }
 
   console.error("[aso] workspace parse failed, resetting to default");
-  return createDefaultAsoWorkspace();
+  return getDefaultWorkspace(projectType);
+}
+
+function applyProjectTypeDefaults(
+  workspace: AsoWorkspace,
+  projectType?: string | null,
+): { workspace: AsoWorkspace; changed: boolean } {
+  if (!isUiuxProject(projectType) || getUiuxPresetById(workspace.outputSizePreset)) {
+    return { workspace, changed: false };
+  }
+  return {
+    workspace: { ...workspace, outputSizePreset: getDefaultUiuxPreset().id },
+    changed: true,
+  };
+}
+
+async function loadWorkspaceRow(projectId: number, projectType?: string | null): Promise<AsoWorkspace> {
+  const row = await u.db("o_agentWorkData").where({ projectId, key: ASO_WORKSPACE_KEY }).first();
+  if (!row?.data) return getDefaultWorkspace(projectType);
+  const parsed = parseWorkspace(row.data, projectType);
+  const { workspace, changed } = applyProjectTypeDefaults(parsed, projectType);
+  if (changed) await persistWorkspace(projectId, workspace);
+  return workspace;
 }
 
 export async function fetchProject(projectId: number) {
@@ -76,8 +99,12 @@ export async function assertCreativeProject(projectId: number) {
   return project;
 }
 
-export function getDefaultWorkspace(): AsoWorkspace {
-  return createDefaultAsoWorkspace();
+export function getDefaultWorkspace(projectType?: string | null): AsoWorkspace {
+  const workspace = createDefaultAsoWorkspace();
+  if (isUiuxProject(projectType)) {
+    workspace.outputSizePreset = getDefaultUiuxPreset().id;
+  }
+  return workspace;
 }
 
 async function persistWorkspace(projectId: number, workspace: AsoWorkspace) {
@@ -101,19 +128,19 @@ async function persistWorkspace(projectId: number, workspace: AsoWorkspace) {
 }
 
 export async function getOrCreateWorkspace(projectId: number): Promise<AsoWorkspace> {
-  await assertCreativeProject(projectId);
+  const project = await assertCreativeProject(projectId);
   const row = await u.db("o_agentWorkData").where({ projectId, key: ASO_WORKSPACE_KEY }).first();
-  if (row?.data) return parseWorkspace(row.data);
-  const workspace = getDefaultWorkspace();
+  if (row?.data) return loadWorkspaceRow(projectId, project.projectType);
+  const workspace = getDefaultWorkspace(project.projectType);
   await persistWorkspace(projectId, workspace);
   return workspace;
 }
 
 export async function getWorkspace(projectId: number): Promise<AsoWorkspace> {
-  await assertCreativeProject(projectId);
+  const project = await assertCreativeProject(projectId);
   const row = await u.db("o_agentWorkData").where({ projectId, key: ASO_WORKSPACE_KEY }).first();
   if (!row) return getOrCreateWorkspace(projectId);
-  return parseWorkspace(row.data);
+  return loadWorkspaceRow(projectId, project.projectType);
 }
 
 export async function patchWorkspace(projectId: number, partial: Partial<AsoWorkspace>): Promise<AsoWorkspace> {

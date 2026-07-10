@@ -5,7 +5,7 @@ import { success } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 const router = express.Router();
 
-// 新增项目（projectType 支持 novel / script / aso，ASO 由前端传 value="aso"）
+// 新增项目（projectType 支持 novel / script / aso / uiux）
 export default router.post(
   "/",
   validateFields({

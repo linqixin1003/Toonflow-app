@@ -169,6 +169,21 @@ export function withEditTagLock<T>(
   return result;
 }
 
+const activeUiuxInputOps = new Set<number>();
+
+export function acquireUiuxInputOp(projectId: number): void {
+  if (activeUiuxInputOps.has(projectId)) {
+    const err = new Error("正在处理输入，请稍候");
+    (err as any).statusCode = 409;
+    throw err;
+  }
+  activeUiuxInputOps.add(projectId);
+}
+
+export function releaseUiuxInputOp(projectId: number): void {
+  activeUiuxInputOps.delete(projectId);
+}
+
 export function httpStatusFromError(e: unknown): number {
   const code = (e as { statusCode?: number })?.statusCode;
   if (code === 409 || code === 404) return code;

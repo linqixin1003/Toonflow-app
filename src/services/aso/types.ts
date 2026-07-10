@@ -46,6 +46,7 @@ export const AsoNodePositionSchema = z.object({
 export const AsoWorkspaceSchema = z.object({
   version: z.literal(1),
   inputText: z.string(),
+  rawInputText: z.string().optional().default(""),
   planCount: z.number().int().min(1).max(10),
   imagePromptCount: z.number().int().min(0).max(20).optional().default(0),
   plans: z.array(AsoPlanSchema),
@@ -69,6 +70,7 @@ export function createDefaultAsoWorkspace(): AsoWorkspace {
   return {
     version: 1,
     inputText: "",
+    rawInputText: "",
     planCount: 1,
     imagePromptCount: 0,
     plans: [],
