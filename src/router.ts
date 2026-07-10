@@ -1,4 +1,4 @@
-// @routes-hash 7389e816e67545f05b641b20da399547
+// @routes-hash d32b5b3ae31eaecaf6a41979f8c2ec58
 import { Express } from "express";
 
 import route1 from "./routes/agents/clearMemory";
@@ -198,9 +198,10 @@ import route194 from "./routes/uiux/getWorkspace";
 import route195 from "./routes/uiux/listMaterials";
 import route196 from "./routes/uiux/optimizePrompt";
 import route197 from "./routes/uiux/pollingOutputs";
-import route198 from "./routes/uiux/saveWorkspace";
-import route199 from "./routes/uiux/updatePlan";
-import route200 from "./routes/uiux/uploadMaterial";
+import route198 from "./routes/uiux/refineInput";
+import route199 from "./routes/uiux/saveWorkspace";
+import route200 from "./routes/uiux/updatePlan";
+import route201 from "./routes/uiux/uploadMaterial";
 
 export default async (app: Express) => {
   app.use("/api/agents/clearMemory", route1);
@@ -400,7 +401,8 @@ export default async (app: Express) => {
   app.use("/api/uiux/listMaterials", route195);
   app.use("/api/uiux/optimizePrompt", route196);
   app.use("/api/uiux/pollingOutputs", route197);
-  app.use("/api/uiux/saveWorkspace", route198);
-  app.use("/api/uiux/updatePlan", route199);
-  app.use("/api/uiux/uploadMaterial", route200);
+  app.use("/api/uiux/refineInput", route198);
+  app.use("/api/uiux/saveWorkspace", route199);
+  app.use("/api/uiux/updatePlan", route200);
+  app.use("/api/uiux/uploadMaterial", route201);
 }
